@@ -1,0 +1,52 @@
+# global variables for IPv6
+:global currentIpv6
+
+# Tên interface nội bộ đang giữ IP Global
+:local wanInterface "Bridge Home"
+
+:local newIpCidr
+:do {
+    # THAY ĐỔI CHÍNH: Thêm disabled=no để loại bỏ các dòng ula-pool đang tắt
+    :set newIpCidr [/ipv6 address get [find interface="$wanInterface" global disabled=no] address]
+} on-error={
+    :log error "DDNS IPv6: Khong tim thay IPv6 Global tren interface $wanInterface"
+}
+
+:if ([:len $newIpCidr] > 0) do={
+    # Phòng hờ nếu vẫn trả về mảng, lấy đúng phần tử đầu tiên
+    :if ([:typeof $newIpCidr] = "array") do={
+        :set newIpCidr [:pick $newIpCidr 0]
+    }
+
+    # Cắt bỏ phần Subnet /64 ở cuối
+    :local newIp [:pick $newIpCidr 0 [:find $newIpCidr "/"]]
+    
+    # Nếu IP biến động so với lần chạy trước thì mới update lên Cloudflare
+    :if ($newIp != $currentIpv6) do={
+
+        # --- CẤU HÌNH CLOUDFLARE ---
+        :local cfToken "your CF token"
+        :local cfZoneId "your CF ZoneId"
+        # CHÚ Ý: cfDnsId này phải là ID của bản ghi AAAA (IPv6) trên Cloudflare
+        :local cfDnsId "Your CF DNS ID , must be for AAAA record" 
+        :local dnsType "AAAA"
+        :local dnsName "your.domain.com"
+        :local dnsTTL "1"
+        :local dnsProxied "false"
+        # --------------------------
+
+        :local apiUrl "https://api.cloudflare.com/client/v4/zones/$cfZoneId/dns_records/$cfDnsId"
+        :local headers "Authorization: Bearer $cfToken"
+        :local payload "{\"type\":\"$dnsType\",\"name\":\"$dnsName\",\"content\":\"$newIp\",\"ttl\":$dnsTTL,\"proxied\":$dnsProxied}"
+
+        :do {
+            :local response [/tool fetch http-method="put" url=$apiUrl http-header-field=$headers http-data=$payload as-value output=user]
+            :if ($response->"status" = "finished") do={
+                :log info "DDNS IPv6: Update thanh cong! IP hien tai: $newIp"
+                :set currentIpv6 $newIp
+            }
+        } on-error={
+            :log error "DDNS IPv6: API Cloudflare bi loi khi update IP $newIp"
+        }
+    }
+}
