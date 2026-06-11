@@ -1,0 +1,43 @@
+# global variables
+# we'll update it on every ddns success
+:global currentIp
+
+# outgoing interface
+:local wanInterface "pppoe-out1"
+
+# get current $wanInterface IP
+:local newIpCidr [/ip address get [find interface="$wanInterface"] address ]
+:local newIp [:pick $newIpCidr 0 [:find $newIpCidr "/"]]
+
+:if ($newIp != $currentIp) do={
+  # cloudflare variables, adjust with yours, ask AI to get Details how to get these variables.
+  :local cfToken "your-cloudflare-token"
+  :local cfZoneId "your-cloudflare-ZoneID"
+  :local cfDnsId "Your-cloudflare-DNSid"
+  :local dnsType "A"
+  :local dnsName "your.domain.com"
+  :local dnsTTL "1"
+  :local dnsProxied "false"
+
+  # compose endpoint
+  # docs: https://api.cloudflare.com/#dns-records-for-a-zone-update-dns-record
+  :local apiUrl "https://api.cloudflare.com/client/v4/zones/$cfZoneId/dns_records/$cfDnsId"
+
+  # compose headers & payload
+  :local headers "Authorization: Bearer $cfToken"
+  :local payload "{\"type\":\"$dnsType\",\"name\":\"$dnsName\",\"content\":\"$newIp\",\"ttl\":$dnsTTL,\"proxied\":$dnsProxied}"
+
+  # make API request
+  :do {
+    :local response [/tool fetch http-method="put" url=$apiUrl http-header-field=$headers http-data=$payload as-value output=user]
+
+    :if ($response->"status" = "finished") do={
+        :log info "DDNS: changed $currentIp to $newIp"
+
+        # update $currentIp with the new one
+        :set currentIp $newIp
+    }
+  } on-error {
+    :log error "DDNS: failed to change IP $currentIp to $newIp"
+  }
+}
